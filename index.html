@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base href="/">
+  <script>
+    (() => {
+      let appBasePath = window.location.pathname;
+      if (!appBasePath.endsWith('/')) appBasePath += '/';
+      const appBase = new URL(appBasePath, window.location.origin);
+      document.querySelector('base').setAttribute('href', appBase.href);
+
+      const versionKey = `turnos-app-version:${appBase.pathname}`;
+      let versionCheckStarted = false;
+      let currentServerVersion;
+
+      const getServerVersion = async () => {
+        const cacheBuster = `?v=${Date.now()}`;
+        const [versionResponse, workerResponse] = await Promise.all([
+          fetch(new URL(`version.json${cacheBuster}`, appBase), {
+            cache: 'no-store',
+          }),
+          fetch(new URL(`flutter_service_worker.js${cacheBuster}`, appBase), {
+            cache: 'no-store',
+          }),
+        ]);
+
+        if (!versionResponse.ok || !workerResponse.ok) {
+          throw new Error('No se pudo consultar la versión publicada.');
+        }
+
+        const version = await versionResponse.json();
+        const workerSource = await workerResponse.text();
+        let workerFingerprint;
+        if (window.crypto?.subtle) {
+          const digest = await window.crypto.subtle.digest(
+            'SHA-256',
+            new TextEncoder().encode(workerSource),
+          );
+          workerFingerprint = Array.from(new Uint8Array(digest))
+            .map((byte) => byte.toString(16).padStart(2, '0'))
+            .join('');
+        } else {
+          let hash = 2166136261;
+          for (let index = 0; index < workerSource.length; index += 1) {
+            hash = Math.imul(hash ^ workerSource.charCodeAt(index), 16777619);
+          }
+          workerFingerprint = (hash >>> 0).toString(16);
+        }
+
+        return `${version.version}+${version.build_number}:${workerFingerprint}`;
+      };
+
+      const checkForUpdate = async () => {
+        try {
+          const serverVersion = await getServerVersion();
+          currentServerVersion = serverVersion;
+          const previousVersion = window.localStorage.getItem(versionKey);
+          if (previousVersion === null) {
+            window.localStorage.setItem(versionKey, serverVersion);
+            return true;
+          }
+          if (previousVersion === serverVersion) return true;
+
+          window.localStorage.setItem(versionKey, serverVersion);
+          if (window.localStorage.getItem(versionKey) === serverVersion) {
+            window.location.reload();
+            return false;
+          }
+        } catch (error) {
+          console.warn('No se pudo comprobar si hay una versión nueva:', error);
+        }
+        return true;
+      };
+
+      const addLink = (rel, file) => {
+        const link = document.createElement('link');
+        link.rel = rel;
+        link.href = new URL(file, appBase).href;
+        document.head.appendChild(link);
+      };
+
+      const startApp = async () => {
+        if (!(await checkForUpdate())) return;
+
+        const bootstrap = document.createElement('script');
+        const bootstrapVersion = encodeURIComponent(
+          currentServerVersion || Date.now().toString(),
+        );
+        bootstrap.src = new URL(
+          `flutter_bootstrap.js?v=${bootstrapVersion}`,
+          appBase,
+        ).href;
+        bootstrap.async = true;
+        document.head.appendChild(bootstrap);
+
+        if (!versionCheckStarted) {
+          versionCheckStarted = true;
+          window.setInterval(checkForUpdate, 60_000);
+        }
+      };
+
+      addLink('apple-touch-icon', 'icons/Icon-192.png');
+      addLink('icon', 'favicon.png');
+      addLink('manifest', 'manifest.json');
+      startApp();
+    })();
+  </script>
+
+  <meta charset="UTF-8">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="Aplicación de gestión de turnos de camiones.">
+
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="turnos_camiones">
+  <title>Turnos Camiones</title>
+</head>
+<body>
+</body>
+</html>
